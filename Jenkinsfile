@@ -6,7 +6,7 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-server'
         SONARQUBE_SERVER = 'sonar-server'  // The name of your SonarQube server
         SLACK_CHANNEL = 'new-channel'    // Slack channel for notifications
         ARTIFACTS_DIR = "target"           // Directory for generated artifacts

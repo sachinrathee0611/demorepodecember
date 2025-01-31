@@ -1,89 +1,43 @@
 pipeline {
     agent any
 
-    tools {
-        maven 'maven3'
-    }
-
     environment {
-        SCANNER_HOME = tool 'sonar-server'
-        SONARQUBE_SERVER = 'sonar-server'  // The name of your SonarQube server
-        SLACK_CHANNEL = 'new-channel'    // Slack channel for notifications
-        ARTIFACTS_DIR = "target"           // Directory for generated artifacts
-        MAVEN_OPTS = '--add-opens java.base/java.lang=ALL-UNNAMED'
+        SLACK_CHANNEL = '#my-channel' // Slack channel for notifications
     }
 
     stages {
-        // Clean the workspace before starting the build
-        stage('Clean Workspace') {
+        // Retrieve artifacts from upstream job
+        stage('Retrieve Artifacts') {
             steps {
-                cleanWs()  // Clean the workspace before starting the build
+                copyArtifacts(
+                    projectName: 'Upstream-Build', // Replace with your upstream pipeline name
+                    filter: 'target/*.war',        // Specify the artifact(s) you want to copy
+                    target: 'target'              // Directory to copy artifacts to
+                )
             }
         }
 
-        // Checkout the code from the GitHub repository
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        // Build the project using Maven and generate artifacts
-        stage('Build') {
-            steps {
-                script {
-                    echo 'Building the project...'
-                    sh 'mvn clean install'  // Build the project using Maven
+        // Deploy the application based on the branch
+        stage('Deploy') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'testing'
+                    branch 'development'
                 }
             }
-        }
-
-        // Run SonarQube analysis to check code quality
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv(SONARQUBE_SERVER) {
-                    sh '''
-                    $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Java \
-                    -Dsonar.java.binaries=. \
-                    -Dsonar.projectKey=Java
-                    '''
-                }
-            }
-        }
-
-        // Wait for the Quality Gate to pass or fail
-        stage('Quality Gate') {
             steps {
                 script {
-                    waitForQualityGate abortPipeline: true, credentialsId: 'sonar-token'
-                }
-            }
-        }
-
-        // Run unit tests and generate test reports in HTML format
-        stage('Test') {
-            steps {
-                script {
-                    echo 'Running tests...'
-                    sh 'mvn test'  // Run unit tests
-                    junit '**/target/surefire-reports/*.xml'  // Publish JUnit test results
-
-                    publishHTML(target: [
-                        reportName: 'Test Results',
-                        reportDir: 'target/surefire-reports',  // Ensure this is the correct directory for the HTML report
-                        reportFiles: 'surefire-report.html',   // Ensure this is the correct file for the HTML report
-                        keepAll: true
-                    ])
-                }
-            }
-        }
-
-        // Archive generated artifacts for downstream jobs
-        stage('Archive Artifacts') {
-            steps {
-                script {
-                    sh 'ls -al target'  // List the contents of the target directory
-                    archiveArtifacts artifacts: 'target/*.war', allowEmptyArchive: false
+                    if (env.BRANCH_NAME == 'main') {
+                        echo "Deploying to production (prod) environment..."
+                        sh './deploy-prod.sh'  // Example production deploy script
+                    } else if (env.BRANCH_NAME == 'testing') {
+                        echo "Deploying to testing environment..."
+                        sh './deploy-staging.sh'  // Example staging deploy script
+                    } else if (env.BRANCH_NAME.startsWith('development')) {
+                        echo "Deploying to development environment for ${env.BRANCH_NAME}..."
+                        sh './deploy-beta.sh'  // Example beta-specific deploy script
+                    }
                 }
             }
         }
@@ -91,10 +45,18 @@ pipeline {
 
     post {
         success {
-            slackSend(channel: SLACK_CHANNEL, message: "Pipeline completed successfully :tada:", color: 'good')
+            slackSend(
+                channel: SLACK_CHANNEL, 
+                message: "Downstream Build ${env.BUILD_ID} completed successfully :tada:", 
+                color: 'good'
+            )
         }
         failure {
-            slackSend(channel: SLACK_CHANNEL, message: "Pipeline failed :x:", color: 'danger')
+            slackSend(
+                channel: SLACK_CHANNEL, 
+                message: "Downstream Build ${env.BUILD_ID} failed. Please check the logs! :x:", 
+                color: 'danger'
+            )
         }
     }
 }
